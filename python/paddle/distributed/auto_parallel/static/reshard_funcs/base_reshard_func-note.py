@@ -59,7 +59,7 @@ def is_shard(dist_attr):
 # 检查分布属性是否表示一个部分复制张量的函数
 # 如果张量具有任何部分状态，则返回 True
 def is_partial(dist_attr):
-    if len(dist_attr.partial_status) > 0:
+    if len(dist_attr.partial_status) > 0: 
         return True
     return False
 

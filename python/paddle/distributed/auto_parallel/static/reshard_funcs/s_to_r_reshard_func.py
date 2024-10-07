@@ -25,8 +25,8 @@ from .base_reshard_func import (
 from .same_status_reshard_func import SameStatusReshardFunction
 
 
-class SToRReshardFunction(ReshardFunction):
-    def is_suitable(self, src_dist_attr, dst_dist_attr):
+class SToRReshardFunction(ReshardFunction): #shard->replicated
+    def is_suitable(self, src_dist_attr, dst_dist_attr): #检测是否合适使用 
         if not is_shard(src_dist_attr):
             return False
 

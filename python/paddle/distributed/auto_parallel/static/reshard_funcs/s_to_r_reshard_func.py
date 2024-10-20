@@ -45,11 +45,55 @@ class SToRReshardFunction(ReshardFunction): #shard->replicated
         return True
 
     def infer_allgather_dist_type(self, in_value, split_axis): #推断all_gather之后的数据类型
-        tensor_ndim = len(in_value.shape)
+        """
+        infer dist type after allgather
+
+        Args:
+            in_value(tensor) : input tensor
+            split_axis(int) : input tensor's split axis
+
+        Returns:
+            out_type(dist_type) : 输出的张量
+
+        Examples: 
+            假设输入为：
+            in_value = [[1,2,3,4,5],
+                        [6,7,8,9,10]]
+            split_axis = 1
+
+            (mesh = [0,1,2])
+            (placements1 = [dist.Shard(1)])
+
+            Steps:
+            1. 获取输入张量的 维度数量/分布式属性(dims_mapping[split_axis]/mesh)    Note: 分布式属性 <> placements
+                tensor_dim = #2
+                in_dist_attr = #(dims_mapping,process_mesh)
+                split_mesh_dim = #in_dist_attr.dims_mapping[1] = 0 表示张量的内层,在被mesh的0轴切分 (这里和placements的[dist.Shard(0)]不一样,placements代表去切分张量的第0轴)
+                mesh = #[0,1,2]
+
+            2. 推测out的 local_shape/global_shape/type     Note:一个Process只能看到自身的local shape,能够看到global tensor吗？
+                out_local_shape = #[2,5]
+                out_local_shape = #[2,5+3-1/3] = [2,2] #切分后的
+                out_global_shape = #[2,2]
+                out_global_shape = #[2,2*3] ?为什么是0维度相乘,难道不是[split_axis]吗？
+
+                #Note:静态图需要显式定义 张量形状和数据类型，分布式还需要tensor_dist_attr
+                out_type = paddle.pir.create_shaped_type(in_value.type,out_global_shape) #创建一个新的张量类型,数据结构和in_value相同,形状和全局输出相同,这是静态图必须的
+
+            3. 推测out的 dims_mapping/dist_attr/type
+                out_dims_mapping = #[-1,0]
+                out_dims_mapping = #[-1,-1] #现在搞成 replicated了,不再是 shard了
+                
+                #Note:tensor_dist_attr包含 mesh,dims_mapping,partial_status,
+                out_dist_attr = paddle.base.libpaddle.pir.create_tensor_dist_attribute( mesh, out_dims_mapping, in_dist_attr.partial_statu) #创建一个分布式属性，mesh和partial_status不变，更新dims_mapping。静态图需要搞新的
+                
+                #Note: tensor_dist_type (type(全局形状,数据类型) , attr_dist_attr(mesh,dims_mapping,partial_status))
+                out_type = paddle.base.libpaddle.pir.cvt_to_dist_type(out_type, out_dist_attr) #把原来张量的out_type,转换为 out_dist_type
+        """
+        tensor_ndim = len(in_value.shape) 
         in_dist_attr = in_value.dist_attr()
         split_mesh_dim = in_dist_attr.dims_mapping[split_axis]
         mesh = in_dist_attr.process_mesh
-
         # Calculate local shape. In nd_mesh_reshard, multiple tensor axis
         # may be shard and it will call this 1-D s_to_r function on each
         # axis. In this case, we should recompute the local and global shape.
@@ -59,7 +103,7 @@ class SToRReshardFunction(ReshardFunction): #shard->replicated
             / mesh.shape[split_mesh_dim]
         )
         out_global_shape = list(out_local_shape)
-        out_global_shape[0] *= mesh.shape[split_mesh_dim]
+        out_global_shape[0] *= mesh.shape[split_mesh_dim] #这里是否写错了？
         out_type = paddle.pir.create_shaped_type(
             in_value.type(), out_global_shape
         )
@@ -73,6 +117,7 @@ class SToRReshardFunction(ReshardFunction): #shard->replicated
             out_type, out_dist_attr
         )
         return out_type
+
     #关键中的关键
     def reshard(self, src_dist_attr, dst_dist_attr, src_value, dst_type):
         """
@@ -87,25 +132,53 @@ class SToRReshardFunction(ReshardFunction): #shard->replicated
         Returns:
             Tensor : dst_value
 
+        Examples:
+            假设输入为
+            src_dist_attr = (mesh = [0,1,2], out_dims_mapping = [-1,0], partial_status = [-1,-1])
+
+            dst_dist_attr = (mesh = [0,1,2], out_dims_mapping = [-1,-1], partial_status = [-1,-1])
+
+            src_value = [[1,2,3,4,5],
+                        [6,7,8,9,10]]
+
+            dst_type = (tensor_type=(形状,数据类型) , tensor_dist_attr = (mesh,dims_mapping,partial_status))
+        
+            Steps:
+            #略过单进程和求split轴
+
+
+            1. 假设只有一个轴被切分(实际中需要多次调用这个切分),找到第一个被分片的轴,对进程数求余数,非0则需要填充(因为all gather需要吗?)
+
+            2. 如果是均匀的直接调用 reshard_s_to_r_with_padding,否则去最后一个进程去padding(接到step3)
+
+            3.
+
         """
-        if src_dist_attr.process_mesh.size == 1:  #说明只有一个进程(设备)，可以共享张量数据，基本忽略
-            dst_value = paddle._C_ops.share_data_(src_value)
-            share_data_op = dst_value.get_defining_op()
+        if src_dist_attr.process_mesh.size == 1:  #说明只有一个进程(设备)，可以共享张量数据，为什么一个进程也能shard呢？
+            dst_value = paddle._C_ops.share_data_(src_value) #就地共享
+            #Note: 静态图中，每一个数据都是由一个操作生成的，需要记录下来get_defining_op()，并设置dist_attr
+            share_data_op = dst_value.get_defining_op() #获取dst_value的定义op 记作share_data_op，静态图需要记录数据是由什么操作生成的
             # set dist type and dist attr
             dst_value.set_type(dst_type)
 
-            chunk_id = -1
-            if src_value.get_defining_op().dist_attr:
-                chunk_id = src_value.get_defining_op().dist_attr.chunk_id
+            chunk_id = -1 
+            if src_value.get_defining_op().dist_attr: #如果源张量有分布式属性
+                chunk_id = src_value.get_defining_op().dist_attr.chunk_id #
+            #Note: op.dist_attr = (mesh,[src_dist_attr],[dst_dist_attr],chunk_id) 需要操作的输入和输出dist_attr，以及mesh和chunk_id
             share_data_op.dist_attr = (
-                paddle.base.libpaddle.pir.create_op_dist_attribute(
+                paddle.base.libpaddle.pir.create_op_dist_attribute( #创建一个 op_dist_attribute
                     src_dist_attr.process_mesh,
                     [src_dist_attr],
                     [dst_dist_attr],
                     chunk_id,
                 )
             )
-            return dst_value
+            #Note: 静态图中:
+            # src_value.dist_type : (type(形状,数据类型), dist_attr(mesh,dims_mapping,partial_status))
+            # 下面是需要设置的 
+            # >> defining_op.dist_attr(src_mesh,[src_dist_attr],[dst_dist_attr],chunk_id))  
+            # >> dst_value.dist_type : (type(形状,数据类型), dist_attr(mesh,dims_mapping,partial_status))
+            return dst_value 
 
         def get_split_axis_with_dims_mapping(dims_mapping): #找出所有被分片的维度，并记录下来
             split_axis = {}
@@ -251,6 +324,95 @@ class SToRReshardFunction(ReshardFunction): #shard->replicated
         dst_type, #数据类型
         padding_num=0, 
     ):
+        """
+        Args:
+            src_value : 源张量
+            split_axis : 切分轴 
+            src_dist_attr : 源张量分布属性,placements和Processmesh
+            dst_dist_attr : 这里是 replicated
+            dst_type : 目标张量数据类型和全局形状
+            padding_num : 填充数量
+
+        Returns:
+            Tensor : dst_value
+
+        Examples1:
+            假设输入为
+
+            Note:这里src_value已经填充过了
+            src_value = [[1,2,3,4,5,0], 
+                        [6,7,8,9,10,0]] 
+
+            src_dist_attr = (mesh = [0,1,2], out_dims_mapping = [-1,0], partial_status = [-1,-1])
+
+            dst_dist_attr = (mesh = [0,1,2], out_dims_mapping = [-1,-1], partial_status = [-1,-1])
+
+            dst_type = (tensor_type=(形状,数据类型) , tensor_dist_attr = (mesh,dims_mapping,partial_status))
+
+            padding_num = 1
+
+            Steps:
+            1. 获取源张量信息
+            得到src的 mesh和process_num,获取源张量 defining op的chunk_id
+                src_mesh = [0,1,2]
+                num_of_process = 3
+                chunk_id = ???
+
+            2. 进程间通信
+            创建进程组,all_gather得到all_gather_value,推测allgather_type并设置
+                group = ([1,2,3])
+
+                #Note:这里是global tensor,local tensor是[[1,2,3,4,5,0], [6,7,8,9,10,0]]
+                all_gather_value = [
+                                    [[1,2,3,4,5,0], 
+                                    [6,7,8,9,10,0]],
+
+                                    [[1,2,3,4,5,0], 
+                                    [6,7,8,9,10,0]],
+
+                                    [[1,2,3,4,5,0], 
+                                    [6,7,8,9,10,0]]] 
+                
+                allgather_type = tensor_dist_type (type(全局形状,数据类型) , tensor_dist_attr(mesh,dims_mapping,partial_status))
+                               = dist_type(type((3,2,5) , float)  , dist_attr([0,1,2],[-1,-1,-1],[-1,-1,-1]))
+                allgather.set_type()
+
+            3. 创建新的张量分布属性 
+                new_dist_attr = tensor_dist_attr(mesh,dims_mapping,partial_status)
+                              = ([0,1,2],[-1,-1,-1],[-1,-1,-1])
+
+            4. 设置allgather_value的defining_op的dist_attr
+                allgather_value.defining_op.dist_attr = defining_op.dist_attr(src_mesh,[src_dist_attr],[dst_dist_attr],chunk_id))
+                                                      = ([0,1,2],[src_dist_attr],[new_dist_attr],0/1/2)
+
+                #Note:这里看到的究竟是local还是global
+                #Note: 静态图搞一个新张量,需要创建并设置:
+                                    defining_op的dist_attr
+                                    tensor的dist_attr
+                                    tensor的dist_type(type,dist_attr)
+            
+            5. 处理切分轴,获取allgather_op,对其result进行split得到split_values,
+               获取第一个分割结果的builtin_difining_op,
+               在得到其operand_source(0).difining_op()作为pd_splite_op？
+
+                allgather_op = 
+                split_values = paddle._C_ops.split_with_num(allgather_op.result(0), num_proc,0)
+                builtin_split_op = split_values[0].get_defining_op()
+
+                #Note: 这个不知道为什么要搞出来pd_split_op,普通的split不够吗？
+                pd_splite_op = builtin_split_op.operand_source(0).get_defining_op()
+                pd_splite_op.dist_attr = copy_op_attr_with_new_member(pd_splite_op.dist_attr, new_chunk_id=chunk_id )
+            
+            6. 修正pd_split_op的输出类型
+
+
+            7. 处理填充部分
+
+
+            8. 处理不需要填充的情况
+
+        """
+
         src_mesh = src_dist_attr.process_mesh
         num_of_process = len(src_mesh.process_ids)
         #获取chunk_id,分块张量的id

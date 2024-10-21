@@ -105,7 +105,7 @@ void SToRReshardFunction::Eval(DeviceContext* dev_ctx,
                                const TensorDistAttr& out_dist_attr,
                                DistTensor* out) {
   VLOG(3) << "Call " << Name();
-  const auto& in_dist_attr = in.dist_attr();
+  const auto& in_dist_attr = in.dist_attr(); //引用而非拷贝
   const auto& in_dims_mapping = in_dist_attr.dims_mapping();
   const auto& in_process_mesh = in_dist_attr.process_mesh();
   const auto& in_process_ids = in_process_mesh.process_ids();

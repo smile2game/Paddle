@@ -1,0 +1,19 @@
+['builtin.parameter', 'dist_op.shard_tensor', 'pd_op.transpose', 'pd_op.reduce_scatter', 'pd_op.transpose']
+['builtin.parameter', 'dist_op.shard_tensor', 'pd_op.transpose', 'pd_op.reduce_scatter', 'pd_op.transpose']
+['builtin.parameter', 'dist_op.shard_tensor', 'pd_op.transpose', 'pd_op.reduce_scatter', 'pd_op.transpose']
+Traceback (most recent call last):
+  File "reshard_p_to_s.py", line 236, in <module>
+    TestReshardPToS().run_pir_unbalanced_split_test_case()
+  File "reshard_p_to_s.py", line 168, in run_pir_unbalanced_split_test_case
+    ReshardPasses.apply_reshard_pass(main_program)
+  File "/home/aistudio/.local/lib/python3.8/site-packages/paddle/distributed/auto_parallel/static/pir_pass.py", line 285, in apply_reshard_pass
+    ReshardPasses.reshard_op_pass(dist_program, params_grads)
+  File "/home/aistudio/.local/lib/python3.8/site-packages/paddle/distributed/auto_parallel/static/pir_pass.py", line 269, in reshard_op_pass
+    out_value = reshard_func.reshard(
+  File "/home/aistudio/.local/lib/python3.8/site-packages/paddle/distributed/auto_parallel/static/reshard_funcs/p_to_s_reshard_func.py", line 84, in reshard
+    dst_value = paddle._C_ops.reduce_scatter(
+ValueError: (InvalidArgument) dim[0] (3) is not divisible by nranks(2)
+  [Hint: Expected dim[0] % nranks == 0, but received dim[0] % nranks:1 != 0:0.] (at /home/aistudio/bd/Paddle/paddle/phi/infermeta/unary.cc:3798)
+
+['builtin.parameter', 'dist_op.shard_tensor', 'pd_op.transpose', 'pd_op.reduce_scatter', 'pd_op.transpose']
+['builtin.parameter', 'dist_op.shard_tensor', 'pd_op.transpose', 'pd_op.reduce_scatter', 'pd_op.transpose']

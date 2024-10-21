@@ -19,7 +19,7 @@ import collective.test_communication_api_base as test_base
 
 class TestReshardPToS(test_base.CommunicationTestDistBase):
     def setUp(self):
-        super().setUp(num_of_devices=1, timeout=12000)
+        super().setUp(num_of_devices=2, timeout=12000)
         self._default_envs = {
             "shape": "(11, 20)",
             "dtype": "float32",
@@ -27,8 +27,8 @@ class TestReshardPToS(test_base.CommunicationTestDistBase):
         }
         self._changeable_envs = {
             # "shard": ["0", "1"],
-            # "shard": ["0"],
-             "shard": ["1"],
+            "shard": ["0"],
+            #  "shard": ["1"],
             "backend": ["gpu"],
             # "backend": ["cpu"],
         }

@@ -37,8 +37,6 @@ class PToSReshardFunction(ReshardFunction):
             src_reduce_type == paddle.base.core.ReduceType.kRedSum
         ), f"The p to s reshard func only support sum op, but received {src_reduce_type}"
         split_axis = dst_dist_attr.dims_mapping.index(0) 
-
-    
         #转置重排
         print(f"split_axis is {split_axis}")
         permulate = False
@@ -92,54 +90,84 @@ class PToSReshardFunction(ReshardFunction):
                 dst_value = paddle._C_ops.transpose(dst_value, perm) #转置
             return dst_value
         else:
-            print("unbalanced,padding->conact->reduce_scatter->split,全都转置了,默认在0维度")
-            out_split_axis = split_axis # out_split_axis = GetSplitAxisWithDimsMapping(out_dist_attr.dims_mapping()).begin()->first;
+            """
+            padding steps:
+                tensor_shape: 3 x 2
+                mesh = [0,1]
+                shard = 0
+                padding_shape: 1 x 2
+                concat_value: 4 x 2
+                shard_value: 2x2 - 2x2
+                split_value(last rank): 1x2 
+            """
+            print("unbalanced,padding->conact->reduce_scatter->split,after permulate,on all split on dim0")
             #所有rank都需要 padding的
-            avg_size_on_split_axis = int((src_value.shape[out_split_axis] + num_of_process -1) / num_of_process) #avg = 3
+            avg_size_on_split_axis = int((src_value.shape[split_axis] + num_of_process -1) / num_of_process) #avg = 3
             padding_num = avg_size_on_split_axis * num_of_process -src_value.shape[split_axis] #padding_num = 3*2 - 5
             #不明白这个 set_type的作用,这里是在更新局部形状吗?那我是不是不需要
-            # tmp_src_type = paddle.base.libpaddle.pir.cvt_to_dist_type(src_value.type(), src_dist_attr, list(local_shape))
+            # tmp_src_type = paddle.base.libpaddle.pir.cvt_to_dist_type(src_value.type(), src_dist_attr, list(src_value._local_shape))
+            # print(f"before set src_value.type is {src_value.type}")
             # src_value.set_type(tmp_src_type)
+            print(f"src_value.type is {src_value.type}")
+            # print(f"\nand its dist_attr is {src_value.dist_attr},\ntmp_src_type is {tmp_src_type}")
 
-            #创建padding张量
-            padding_shape = src_value._local_shape
-            padding_shape[out_split_axis] = padding_num
-            print(f"padding_num is {padding_num}")
-            #使用 pd_op.full来创建
+            #######################################使用 pd_op.full来创建padding_tensor###########################
+            padding_shape = src_value._local_shape 
+            padding_shape[split_axis] = padding_num
+            print(f"every rank has {src_value._local_shape}(3x2),and padding {padding_num}(1x2)")
             print(f"rank{dist.get_rank()} padding_shape is {padding_shape}")
             padding_tensor = paddle.full(   
                 padding_shape,
-                # src_value._local_shape,
                 0.0,
                 src_value.dtype,
             ) 
-            #设置op.full.dist_attr
-            padding_tensor.get_defining_op().dist_attr = (
-                paddle.base.libpaddle.pir.create_op_dist_attribute(
-                    dst_dist_attr.process_mesh, [], [dst_dist_attr]
-                ))
+            # help(paddle.base.libpaddle.pir.cvt_to_dist_type)
+            tmp_src_type = paddle.base.libpaddle.pir.cvt_to_dist_type( #设置分布式属性,直接 = src_dist_attr不行,是read-only的
+                padding_tensor.type(),src_dist_attr
+            )
+            padding_tensor.set_type(tmp_src_type) #修改一个tensor的dist_attr要通过type来修改
 
-            #pd_op.concat拼接起来src_tensor和padding,有很多dist_attr要设置,怎么知道要设置哪些,以及如何设置?
-            concat_value = paddle._C_ops.concat([src_value, padding_tensor], split_axis)
+            print(f"padding_tensor dist_attr is {padding_tensor.dist_attr}")
+            # help(paddle.base.libpaddle.pir.create_op_dist_attribute)
+            print(f"\nbefore set,padding_tensor.get_defining_op().dist_attr is {padding_tensor.get_defining_op().dist_attr}")
+            padding_tensor.get_defining_op().dist_attr = ( #设置 pd_op.full.dist_attr
+                paddle.base.libpaddle.pir.create_op_dist_attribute( 
+                    src_dist_attr.process_mesh,  #都是一样的
+                    [], 
+                    [src_dist_attr] #
+                ))
+            print(f"after set,padding_tensor.get_defining_op().dist_attr is {padding_tensor.get_defining_op().dist_attr}")
+            
+            #######################################使用 pd_op.concat来拼接src_value + padding_tensor###########################
+            # help(paddle._C_ops.concat)
+            print(f"\nsrc_value.dist_attr is {src_value.dist_attr},\npadding_tensor.dist_attr is {padding_tensor.dist_attr}")
+            concat_value = paddle._C_ops.concat(
+                [
+                    src_value,
+                    padding_tensor
+                ], 
+                split_axis)
+            print(f"concat_value.dist_attr is {concat_value.dist_attr}")
             #用来设置 concat op的dist_attr
             axis_dist_attr = (
                 paddle.base.libpaddle.pir.create_tensor_dist_attribute(
                                 src_dist_attr.process_mesh, [-1], {} #这里是否需要设置一下 partial
                 )
             )
-            #为什么这样设置,可以去哪里查一下?
-            concat_value.get_defining_op().dist_attr = (
-                paddle.base.libpaddle.pir.create_op_dist_attribute(
-                    src_dist_attr.process_mesh,
-                    [
-                        paddle.base.libpaddle.pir.create_array_attribute(
-                                [src_dist_attr, dst_dist_attr]
-                        ),
-                        axis_dist_attr,
-                    ],
-                    [src_dist_attr]
-                )
-            )
+            print(f"\nbefore set(no need to set),concat_value.get_defining_op().dist_attr is {concat_value.get_defining_op().dist_attr}")
+            # concat_value.get_defining_op().dist_attr = (
+            #     paddle.base.libpaddle.pir.create_op_dist_attribute(
+            #         src_dist_attr.process_mesh,
+            #         [
+            #             paddle.base.libpaddle.pir.create_array_attribute(
+            #                     [src_dist_attr, dst_dist_attr]
+            #             ), #operant0.dist_attr
+            #             axis_dist_attr, #operant1.dist_attr
+            #         ], #输入的操作数
+            #         [src_dist_attr] #输出的操作数
+            #     )
+            # )
+            # print(f"after set,concat_value.get_defining_op().dist_attr is {concat_value.get_defining_op().dist_attr}")
 
             #设置concat_value type
             dst_value = self.reshard_p_to_s_with_padding(
@@ -150,8 +178,9 @@ class PToSReshardFunction(ReshardFunction):
                 dst_type,
                 padding_num,
                 )
+
             if permulate:
-                dst_value = paddle._C_ops.transpose(dst_value, perm) #转置
+                dst_value = paddle._C_ops.transpose(dst_value, perm) #转置恢复
                 #dims_mapping不需要修正吗?
             return dst_value
 

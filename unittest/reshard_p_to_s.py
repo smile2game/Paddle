@@ -35,7 +35,7 @@ class TestReshardPToS:
         self._shard = eval(os.getenv("shard"))
         self._backend = os.getenv("backend")
         # self._mesh = dist.ProcessMesh([0, 1], dim_names=["x"])
-        self._mesh = dist.ProcessMesh([0], dim_names=["x"])
+        self._mesh = dist.ProcessMesh([0,1], dim_names=["x"])
         # self._out_mesh = dist.ProcessMesh([1, 0], dim_names=["x"])
 
     def run_pir_test_case(self):
@@ -143,8 +143,8 @@ class TestReshardPToS:
             place = paddle.CUDAPlace(dist.get_rank())
 
         BATCH_SIZE = 2 #设置参数
-        SEQ_LEN = 2
-        HIDDEN_SIZE = 3
+        SEQ_LEN = 3
+        HIDDEN_SIZE = 2
         MP_SIZE = 2 
 
         #编写静态图

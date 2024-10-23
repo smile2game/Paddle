@@ -38,9 +38,11 @@ class PToSReshardFunction(ReshardFunction):
         ), f"The p to s reshard func only support sum op, but received {src_reduce_type}"
         split_axis = dst_dist_attr.dims_mapping.index(0) 
         #转置重排
-        print(f"split_axis is {split_axis}")
+        print(f"split_axis is {split_axis}" + ("So need permulate" if split_axis != 0 else ""))
         permulate = False
         if split_axis != 0:
+            print(f"src_value.shape is {src_value.shape}")
+            print(f"src_value.dist_attr is {src_value.dist_attr}")
             perm = list(range(0, len(src_value.shape)))
             print(f"perm is {perm}")
             perm[0] = split_axis

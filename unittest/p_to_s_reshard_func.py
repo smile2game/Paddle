@@ -254,8 +254,12 @@ class PToSReshardFunction(ReshardFunction):
             group = new_process_group(sorted(src_dist_attr.process_mesh.process_ids)) 
             #######################################使用 pd_op.reduce_scatter切分发送到 不同GPU################
             help(paddle._C_ops.reduce_scatter)
+            print(f"group.id is {group.id}")
+            print(f"len(src_dist_attr.process_mesh.process_ids) is {len(src_dist_attr.process_mesh.process_ids)}")
             dst_value = paddle._C_ops.reduce_scatter( 
-                src_value, group.id, len(src_dist_attr.process_mesh.process_ids)
+                src_value, #输入张量
+                group.id,  #
+                len(src_dist_attr.process_mesh.process_ids)
             )
             #设置执行流 为默认
             dst_value.get_defining_op().set_execution_stream(

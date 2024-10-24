@@ -1,11 +1,74 @@
-split_axis is 1
-perm is [0, 1]
-dst_type is pd_dist.tensor<2x3xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[0,-1]>
-balanced,no need to padding!
+split_axis is 0
+unbalanced,padding->conact->reduce_scatter->split,after permulate,on all split on dim0
+src_value.type is <bound method PyCapsule.type of Value(define_op_name=dist_op.shard_tensor, index=0, dtype=pd_dist.tensor<3x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)>, stop_gradient=False)>
+every rank has [3, 7](3x2),and padding 1(1x2)
+rank1 padding_shape is [1, 7]
+padding_tensor dist_attr is <bound method monkey_patch_value_in_dist.<locals>.dist_attr of Value(define_op_name=pd_op.full, index=0, dtype=pd_dist.tensor<1x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)>, stop_gradient=True)>
 
-Before set(reduce_scatter),dst_value.dist_attr is <bound method monkey_patch_value_in_dist.<locals>.dist_attr of Value(define_op_name=pd_op.reduce_scatter, index=0, dtype=pd_dist.tensor<1x3xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]>, stop_gradient=False)>
-After set,dst_value.dist_attr is <bound method monkey_patch_value_in_dist.<locals>.dist_attr of Value(define_op_name=pd_op.reduce_scatter, index=0, dtype=pd_dist.tensor<1x3xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[0,-1]>, stop_gradient=False)>
+Before set,padding_tensor.get_defining_op().dist_attr is None
+After set,padding_tensor.get_defining_op().dist_attr is {mesh:{shape:[2],process_ids:[0,1]},result(0):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)},chunk_id:-1}
+Help on built-in function concat in module paddle.base.libpaddle.pir.ops:
 
-Before set(reduce_scatter),dst_value.get_defining_op() is Operation((%0) = "pd_op.reduce_scatter" (%1) {execution_stream:"DefaultStream",nranks:(Int32)2,op_dist_attr:{mesh:{shape:[2],process_ids:[0,1]},operand(0):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]},result(0):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]},chunk_id:-1},ring_id:(Int32)12,stop_gradient:[false]} : (pd_dist.tensor<2x3xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)>) -> pd_dist.tensor<1x3xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[0,-1]>)
-After set,dst_value.get_defining_op() is Operation((%0) = "pd_op.reduce_scatter" (%1) {execution_stream:"DefaultStream",nranks:(Int32)2,op_dist_attr:{mesh:{shape:[2],process_ids:[0,1]},operand(0):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)},result(0):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[0,-1]},chunk_id:-1},ring_id:(Int32)12,stop_gradient:[false]} : (pd_dist.tensor<2x3xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)>) -> pd_dist.tensor<1x3xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[0,-1]>)
-['builtin.parameter', 'dist_op.shard_tensor', 'pd_op.transpose', 'pd_op.reduce_scatter', 'pd_op.transpose']
+concat(...)
+    C++ interface function for concat.
+
+
+src_value.dist_attr is <bound method monkey_patch_value_in_dist.<locals>.dist_attr of Value(define_op_name=dist_op.shard_tensor, index=0, dtype=pd_dist.tensor<3x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)>, stop_gradient=False)>,
+padding_tensor.dist_attr is <bound method monkey_patch_value_in_dist.<locals>.dist_attr of Value(define_op_name=pd_op.full, index=0, dtype=pd_dist.tensor<1x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)>, stop_gradient=True)>
+concat_value.dist_attr is <bound method monkey_patch_value_in_dist.<locals>.dist_attr of Value(define_op_name=pd_op.concat, index=0, dtype=pd_dist.tensor<4x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]>, stop_gradient=False)>
+axis_dist_attr is mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1], partial(0,SUM)
+
+Before set,concat_value.get_defining_op().dist_attr is {mesh:{shape:[2],process_ids:[0,1]},operand(0):{[mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM),mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)]},operand(1):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1]},result(0):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]},chunk_id:-1}
+After set,concat_value.get_defining_op().dist_attr is {mesh:{shape:[2],process_ids:[0,1]},operand(0):{[mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM),mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)]},operand(1):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1], partial(0,SUM)},result(0):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)},chunk_id:-1}
+
+Before set,concat_value.dist_attr is <bound method monkey_patch_value_in_dist.<locals>.dist_attr of Value(define_op_name=pd_op.concat, index=0, dtype=pd_dist.tensor<4x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]>, stop_gradient=False)>
+After set,concat_value.dist_attr is <bound method monkey_patch_value_in_dist.<locals>.dist_attr of Value(define_op_name=pd_op.concat, index=0, dtype=pd_dist.tensor<4x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)>, stop_gradient=False)>
+Help on built-in function reduce_scatter in module paddle.base.libpaddle.pir.ops:
+
+reduce_scatter(...)
+    C++ interface function for reduce_scatter.
+
+
+Before set(reduce_scatter),dst_value.dist_attr is <bound method monkey_patch_value_in_dist.<locals>.dist_attr of Value(define_op_name=pd_op.reduce_scatter, index=0, dtype=pd_dist.tensor<2x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]>, stop_gradient=False)>
+After set,dst_value.dist_attr is <bound method monkey_patch_value_in_dist.<locals>.dist_attr of Value(define_op_name=pd_op.reduce_scatter, index=0, dtype=pd_dist.tensor<2x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[0,-1]>, stop_gradient=False)>
+
+Before set(reduce_scatter),dst_value.get_defining_op() is Operation((%0) = "pd_op.reduce_scatter" (%1) {execution_stream:"DefaultStream",nranks:(Int32)2,op_dist_attr:{mesh:{shape:[2],process_ids:[0,1]},operand(0):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]},result(0):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]},chunk_id:-1},ring_id:(Int32)12,stop_gradient:[false]} : (pd_dist.tensor<4x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)>) -> pd_dist.tensor<2x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[0,-1]>)
+After set,dst_value.get_defining_op() is Operation((%0) = "pd_op.reduce_scatter" (%1) {execution_stream:"DefaultStream",nranks:(Int32)2,op_dist_attr:{mesh:{shape:[2],process_ids:[0,1]},operand(0):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)},result(0):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[0,-1]},chunk_id:-1},ring_id:(Int32)12,stop_gradient:[false]} : (pd_dist.tensor<4x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1], partial(0,SUM)>) -> pd_dist.tensor<2x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[0,-1]>)
+On rank1,dst_value._local_shape[split_axis] is 1(2)
+On rank1,dst_value.shape[split_axis] is 2(4(local))
+Help on built-in function split in module paddle.base.libpaddle.pir.ops:
+
+split(...)
+    C++ interface function for split.
+
+Help on built-in function split_with_num in module paddle.base.libpaddle.pir.ops:
+
+split_with_num(...)
+    C++ interface function for split_with_num.
+
+
+Before set(split),dst_value.dist_attr is <bound method monkey_patch_value_in_dist.<locals>.dist_attr of Value(define_op_name=builtin.split, index=0, dtype=pd_dist.tensor<1x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]>, stop_gradient=False)>
+After set,dst_value.dist_attr is <bound method monkey_patch_value_in_dist.<locals>.dist_attr of Value(define_op_name=builtin.split, index=0, dtype=pd_dist.tensor<1x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[0,-1]>, stop_gradient=False)>
+
+Before set(split),dst_value.get_defining_op() is Operation((%0, %1) = "builtin.split" (%2) {stop_gradient:[false,false]} : (vec[pd_dist.tensor<1x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]>,pd_dist.tensor<1x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]>]) -> pd_dist.tensor<1x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[0,-1]>, pd_dist.tensor<1x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]>)
+After set,dst_value.get_defining_op() is Operation((%0, %1) = "builtin.split" (%2) {op_dist_attr:{mesh:{shape:[2],process_ids:[0,1]},operand(0):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[0,-1]},result(0):{mesh_shape:[2],process_ids:[0,1],dims_mappings:[0,-1]},chunk_id:-1},stop_gradient:[false,false]} : (vec[pd_dist.tensor<1x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]>,pd_dist.tensor<1x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]>]) -> pd_dist.tensor<1x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[0,-1]>, pd_dist.tensor<1x7xf32, mesh_shape:[2],process_ids:[0,1],dims_mappings:[-1,-1]>)
+['builtin.parameter', 'dist_op.shard_tensor', 'pd_op.full', 'pd_op.full', 'builtin.combine', 'pd_op.concat', 'pd_op.reduce_scatter', 'pd_op.full_int_array', 'pd_op.full', 'pd_op.split', 'builtin.split']
+rank1的op数量和名称匹配!
+concat_op.dist_attr匹配
+concat_op.operand(0) dist_attr匹配
+concat_op.operand(1) dist_attr匹配
+concat_op.result(0) dist_attr匹配
+concat_op.value.dist_attr匹配
+reduce_scatter_op.dist_attr匹配
+reduce_scatter_op.operand(0) dist_attr匹配
+reduce_scatter_op.result(0) dist_attr匹配
+reduce_scatter_op.value.dist_attr匹配
+op.dist_attr.num_operands() is 3
+split_op.dist_attr匹配
+op_operand_dist_attr.dims_mapping is [-1, -1]
+Traceback (most recent call last):
+  File "reshard_p_to_s.py", line 374, in <module>
+    TestReshardPToS().run_pir_unbalanced_split_test_case()
+  File "reshard_p_to_s.py", line 343, in run_pir_unbalanced_split_test_case
+    assert op_operand_dist_attr.dims_mapping == [0, -1]
+AssertionError

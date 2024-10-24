@@ -38,9 +38,9 @@ class PToSReshardFunction(ReshardFunction):
         ), f"The p to s reshard func only support sum op, but received {src_reduce_type}"
         split_axis = dst_dist_attr.dims_mapping.index(0) 
         #转置重排
-        print(f"split_axis is {split_axis}" + ("So need permulate" if split_axis != 0 else ""))
+        print(f"split_axis is {split_axis}" + (" So need permulate" if split_axis != 0 else ""))
         permulate = False
-        if split_axis != 0:
+        if split_axis != 0: #归根结底是 reduce_scatter的问题
             print(f"src_value.shape is {src_value.shape}")
             print(f"src_value.dist_attr is {src_value.dist_attr}")
             perm = list(range(0, len(src_value.shape)))
@@ -48,28 +48,33 @@ class PToSReshardFunction(ReshardFunction):
             perm[0] = split_axis
             perm[split_axis] = 0
             src_value = paddle._C_ops.transpose(src_value, perm) #交换 0 和 split_axis这个矩阵
-            tmp_dims_mapping = dst_dist_attr.dims_mapping
-            tmp_dims_mapping[split_axis] = -1
-            tmp_dims_mapping[0] = 0 
-            dst_dist_attr = copy_dist_attr_with_new_member(
-                dst_dist_attr, new_dims_mapping=tmp_dims_mapping
-            ) #调整dst_dist_attr的dims_mapping，交换了0和split_axis
+            print(f"src_value.dist_attr is {src_value.dist_attr}")
 
-            global_dst_attr = dst_type.as_dist_type().dist_attr() #从dst_type中抽取出来dst_dist_attr
+            # tmp_dims_mapping = dst_dist_attr.dims_mapping
+            # tmp_dims_mapping[split_axis] = -1
+            # tmp_dims_mapping[0] = 0 
+            # dst_dist_attr = copy_dist_attr_with_new_member(
+            #     dst_dist_attr, new_dims_mapping=tmp_dims_mapping
+            # ) #调整dst_dist_attr的dims_mapping，交换了0和split_axis
+
+            # global_dst_attr = dst_type.as_dist_type().dist_attr() #从dst_type中抽取出来dst_dist_attr
+            # # print(f"dst_type is {dst_type}")
+            # # print(f"global_dst_attr is {global_dist_attr}") 
+            # global_dims_mapping = global_dst_attr.dims_mapping
+            # axis = global_dims_mapping[0]
+            # global_dims_mapping[0] = global_dims_mapping[split_axis] 
+            # global_dims_mapping[split_axis] = axis #交换global_dims_mapping的0和split_axis
+            # global_dist_attr = copy_dist_attr_with_new_member(
+            #     global_dst_attr, new_dims_mapping=global_dims_mapping 
+            # ) #前面dst_dist_attr调整过了,global_dst_attr还需要重新调整一遍,为什么???
+            # dst_type = paddle.base.libpaddle.pir.cvt_to_dist_type(
+            #     src_value.type(), global_dist_attr
+            # ) #这里是什么意思???
             # print(f"dst_type is {dst_type}")
-            # print(f"global_dst_attr is {global_dist_attr}") 
-            global_dims_mapping = global_dst_attr.dims_mapping
-            axis = global_dims_mapping[0]
-            global_dims_mapping[0] = global_dims_mapping[split_axis] 
-            global_dims_mapping[split_axis] = axis #交换global_dims_mapping的0和split_axis
-            global_dist_attr = copy_dist_attr_with_new_member(
-                global_dst_attr, new_dims_mapping=global_dims_mapping 
-            ) #前面dst_dist_attr调整过了,global_dst_attr还需要重新调整一遍,为什么???
-            dst_type = paddle.base.libpaddle.pir.cvt_to_dist_type(
-                src_value.type(), global_dist_attr
-            ) #这里是什么意思???
-            print(f"dst_type is {dst_type}")
+
             permulate = True
+            original_dims_mapping = dst_dist_attr.dims_mapping.copy()  # 保存原始的 dims_mapping
+            original_split_axis = split_axis  # 保存原始的 split_axis
             split_axis = 0
 
         #检测是否需要padding padding
@@ -90,6 +95,19 @@ class PToSReshardFunction(ReshardFunction):
                 )
             if permulate:
                 dst_value = paddle._C_ops.transpose(dst_value, perm) #转置
+                # 恢复 dst_value 的 dims_mapping
+                # 创建新的 dist_attr，使用原始的 dims_mapping
+                # dst_value_dist_attr = copy_dist_attr_with_new_member(
+                #     dst_dist_attr, new_dims_mapping=original_dims_mapping
+                # )
+                # 更新 dst_value 的类型，以包含正确的 dist_attr
+                # dst_value.set_type(
+                #     paddle.base.libpaddle.pir.cvt_to_dist_type(
+                #         dst_value.type(), dst_value_dist_attr
+                #     )
+                # )
+                # 如果需要，恢复 split_axis
+                split_axis = original_split_axis
             return dst_value
         else:
             """
@@ -198,8 +216,30 @@ class PToSReshardFunction(ReshardFunction):
                 )
 
             if permulate:
-                dst_value = paddle._C_ops.transpose(dst_value, perm) #转置恢复
-                #恢复 dims_mapping?
+                dst_value = paddle._C_ops.transpose(dst_value, perm) #转置
+                # 恢复 dst_value 的 dims_mapping
+               #set dst_value.type
+                print(f"\nBefore set(split),dst_value.dist_attr is {dst_value.dist_attr}")
+                tmp_dst_perm_type = paddle.base.libpaddle.pir.cvt_to_dist_type( #设置padding_tensor的dist_attr,直接 = src_dist_attr不行,是read-only的
+                    dst_value.type(), #pir.global type
+                    dst_dist_attr #pir.dist_attr
+                )
+                dst_value.set_type(tmp_dst_perm_type) #这里修正了 dims_mapping
+                print(f"After set,dst_value.dist_attr is {dst_value.dist_attr}")
+                
+                # set dst_value.get_defining_op().dist_attr
+                print(f"\nBefore set(split),dst_value.get_defining_op() is {dst_value.get_defining_op()}")
+                dst_value.get_defining_op().dist_attr = (
+                    paddle.base.libpaddle.pir.create_op_dist_attribute(
+                        dst_dist_attr.process_mesh, 
+                        [dst_dist_attr], 
+                        [dst_dist_attr], 
+                        src_value.get_defining_op().dist_attr.chunk_id
+                    )
+                )
+                print(f"After set,dst_value.get_defining_op() is {dst_value.get_defining_op()}") #修正了operand(0)的partial和result(0)的dims_mapping
+                # 如果需要，恢复 split_axis
+                split_axis = original_split_axis
             return dst_value
 
     def reshard_p_to_s_with_padding(
@@ -213,6 +253,7 @@ class PToSReshardFunction(ReshardFunction):
         ):
             group = new_process_group(sorted(src_dist_attr.process_mesh.process_ids)) 
             #######################################使用 pd_op.reduce_scatter切分发送到 不同GPU################
+            help(paddle._C_ops.reduce_scatter)
             dst_value = paddle._C_ops.reduce_scatter( 
                 src_value, group.id, len(src_dist_attr.process_mesh.process_ids)
             )
@@ -242,7 +283,11 @@ class PToSReshardFunction(ReshardFunction):
             print(f"After set,dst_value.get_defining_op() is {dst_value.get_defining_op()}") #修正了operand(0)的partial和result(0)的dims_mapping
             #######################################使用pd_op.split切除掉最后一个 rank上的padding################
             if padding_num!=0:
+                print(f"On rank{dist.get_rank()},dst_value._local_shape[split_axis] is {dst_value._local_shape[split_axis]}(2)")
+                print(f"On rank{dist.get_rank()},dst_value.shape[split_axis] is {dst_value.shape[split_axis]}(4(local))")
                 if dist.get_rank() == dst_dist_attr.process_mesh.process_ids[-1]:
+                    help(paddle._C_ops.split)
+                    help(paddle._C_ops.split_with_num)
                     dst_value = paddle._C_ops.split(
                         dst_value,
                         [

@@ -27,8 +27,8 @@ class TestReshardPToS(test_base.CommunicationTestDistBase):
         }
         self._changeable_envs = {
             # "shard": ["0", "1"],
-            # "shard": ["0"],
-             "shard": ["1"],
+            "shard": ["0"],
+            #  "shard": ["1"],
             "backend": ["gpu"],
             # "backend": ["cpu"],
         }

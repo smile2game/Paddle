@@ -252,14 +252,32 @@ class PToSReshardFunction(ReshardFunction):
         padding_num = 0,
         ):
             group = new_process_group(sorted(src_dist_attr.process_mesh.process_ids)) 
+            print(f"group is {group}")
             #######################################使用 pd_op.reduce_scatter切分发送到 不同GPU################
             help(paddle._C_ops.reduce_scatter)
             print(f"group.id is {group.id}")
             print(f"len(src_dist_attr.process_mesh.process_ids) is {len(src_dist_attr.process_mesh.process_ids)}")
+            #可能是 src_dist_attr没有设置正确
+            #################################test reduce_scatter修正##########################################
+            # print(f"\n(before reduce_catter)src_value.dist_attr is {src_value.dist_attr}")
+            # test_value = paddle._C_ops.reduce_scatter( 
+            #     src_value, #输入张量
+            #     group.id,  #
+            #     len(src_dist_attr.process_mesh.process_ids)
+            # )
+            # print(f"\n(after reduce_catter)test_value.dist_attr is {test_value.dist_attr}")
+            # print(f"\n(reduce_scatter op.dist_attr is {test_value.get_defining_op()}: )")
+            # #这里不对,我手动把他调回来,
+            # global_shape = test_value.shape
+            # process_mesh = src_dist_attr.process_mesh
+            # dims_mapping = [-1,-1]
+            # dims_mapping[split_axis] = 0
+
+            ###########################################################################
             dst_value = paddle._C_ops.reduce_scatter( 
                 src_value, #输入张量
-                group.id,  #
-                len(src_dist_attr.process_mesh.process_ids)
+                group.id,  #12
+                len(src_dist_attr.process_mesh.process_ids) #nranks = 2
             )
             #设置执行流 为默认
             dst_value.get_defining_op().set_execution_stream(
@@ -287,11 +305,11 @@ class PToSReshardFunction(ReshardFunction):
             print(f"After set,dst_value.get_defining_op() is {dst_value.get_defining_op()}") #修正了operand(0)的partial和result(0)的dims_mapping
             #######################################使用pd_op.split切除掉最后一个 rank上的padding################
             if padding_num!=0:
-                print(f"On rank{dist.get_rank()},dst_value._local_shape[split_axis] is {dst_value._local_shape[split_axis]}(2)")
-                print(f"On rank{dist.get_rank()},dst_value.shape[split_axis] is {dst_value.shape[split_axis]}(4(local))")
+                print(f"On rank{dist.get_rank()},dst_value._local_shape[split_axis] is {dst_value._local_shape[split_axis]}(2(local))")
+                print(f"On rank{dist.get_rank()},dst_value.shape[split_axis] is {dst_value.shape[split_axis]}(4(global))")
                 if dist.get_rank() == dst_dist_attr.process_mesh.process_ids[-1]:
-                    help(paddle._C_ops.split)
-                    help(paddle._C_ops.split_with_num)
+                    # help(paddle._C_ops.split)
+                    # help(paddle._C_ops.split_with_num)
                     dst_value = paddle._C_ops.split(
                         dst_value,
                         [
@@ -319,5 +337,6 @@ class PToSReshardFunction(ReshardFunction):
                             src_value.get_defining_op().dist_attr.chunk_id
                         )
                     )
+                    print(f"(split),dst_value.get_defining_op().dist_attr is {dst_value.get_defining_op().dist_attr}")
                     print(f"After set,dst_value.get_defining_op() is {dst_value.get_defining_op()}") #修正了operand(0)的partial和result(0)的dims_mapping
             return dst_value
